@@ -13,6 +13,7 @@ export default function Employees() {
   const [loading, setLoading] = useState(true);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [deleteConfirmEmployee, setDeleteConfirmEmployee] = useState(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [form, setForm] = useState({
@@ -83,14 +84,19 @@ export default function Employees() {
     }
   };
 
-  const handleDelete = async (emp) => {
-    if (!window.confirm(`Delete employee "${emp.full_name}"? This cannot be undone.`)) return;
+  const openDeleteConfirm = (emp) => setDeleteConfirmEmployee(emp);
+  const closeDeleteConfirm = () => setDeleteConfirmEmployee(null);
+
+  const handleDeleteConfirm = async () => {
+    const emp = deleteConfirmEmployee;
+    if (!emp) return;
     setError("");
     setSuccess("");
     setDeletingId(emp.id);
     try {
       await api.delete(`employees/${emp.id}/`);
       setSuccess(`${emp.full_name} removed successfully.`);
+      setDeleteConfirmEmployee(null);
       fetchEmployees();
     } catch (err) {
       const msg =
@@ -100,6 +106,7 @@ export default function Employees() {
           : String(err.response.data)) ||
         "Could not delete employee.";
       setError(msg);
+      setDeleteConfirmEmployee(null);
     } finally {
       setDeletingId(null);
     }
@@ -213,7 +220,7 @@ export default function Employees() {
                       <button
                         type="button"
                         className="btn btn--danger"
-                        onClick={() => handleDelete(emp)}
+                        onClick={() => openDeleteConfirm(emp)}
                         disabled={deletingId !== null}
                         title={`Delete ${emp.full_name}`}
                       >
@@ -234,6 +241,46 @@ export default function Employees() {
           </div>
         )}
       </div>
+
+      {/* Delete confirmation popup */}
+      {deleteConfirmEmployee && (
+        <div
+          className="delete-confirm-overlay"
+          onClick={closeDeleteConfirm}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-confirm-title"
+        >
+          <div className="delete-confirm-popup" onClick={(e) => e.stopPropagation()}>
+            <h3 id="delete-confirm-title" className="delete-confirm-title">
+              Delete employee?
+            </h3>
+            <p className="delete-confirm-message">
+              Are you sure you want to delete <strong>{deleteConfirmEmployee.full_name}</strong>? This cannot be undone.
+            </p>
+            <div className="delete-confirm-actions">
+              <button type="button" className="btn btn--secondary" onClick={closeDeleteConfirm} disabled={deletingId === deleteConfirmEmployee.id}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--danger"
+                onClick={handleDeleteConfirm}
+                disabled={deletingId === deleteConfirmEmployee.id}
+              >
+                {deletingId === deleteConfirmEmployee.id ? (
+                  <>
+                    <Loader size="small" />
+                    Deleting…
+                  </>
+                ) : (
+                  "Delete"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
