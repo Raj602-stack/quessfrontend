@@ -2,7 +2,14 @@ import { useState, useEffect } from "react";
 import api from "../api/axios";
 import Loader from "../components/Loader";
 
-const TODAY = new Date().toISOString().slice(0, 10);
+function getTodayLocal() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+const TODAY = getTodayLocal();
 
 // Backend expects capitalized choices (e.g. Django: choices=[('Present', 'Present'), ('Absent', 'Absent')])
 const STATUS_PRESENT = "Present";
