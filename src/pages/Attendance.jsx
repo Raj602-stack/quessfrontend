@@ -16,9 +16,31 @@ function normalizeStatus(s) {
   return null;
 }
 
+function isWeekend(dateStr) {
+  if (!dateStr) return false;
+  const date = new Date(dateStr + "T00:00:00");
+  const day = date.getDay();
+  return day === 0 || day === 6; // 0 = Sunday, 6 = Saturday
+}
+
+function getPreviousWeekday(dateStr) {
+  if (!dateStr) return dateStr;
+  const date = new Date(dateStr + "T00:00:00");
+  while (isWeekend(date.toISOString().slice(0, 10))) {
+    date.setDate(date.getDate() - 1);
+  }
+  return date.toISOString().slice(0, 10);
+}
+
 export default function Attendance() {
-  const [viewDate, setViewDate] = useState(TODAY);
-  const [markDate, setMarkDate] = useState(TODAY);
+  const [viewDate, setViewDate] = useState(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return isWeekend(today) ? getPreviousWeekday(today) : today;
+  });
+  const [markDate, setMarkDate] = useState(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return isWeekend(today) ? getPreviousWeekday(today) : today;
+  });
   const [records, setRecords] = useState([]);
   const [employees, setEmployees] = useState([]); // from EmployeeViewSet (includes employee_id, full_name, etc.)
   // Map employee id -> name for View Attendance (API often returns only employee id)
@@ -32,12 +54,49 @@ export default function Attendance() {
   const [markByEmployee, setMarkByEmployee] = useState({});
   // Store existing attendance record IDs: { employeeId: attendanceRecordId }
   const [existingAttendanceIds, setExistingAttendanceIds] = useState({});
+  // Dates for which attendance was saved in this session (editing disabled)
+  const [appliedDates, setAppliedDates] = useState(() => new Set());
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
 
   const isFutureDate = (dateStr) => dateStr && dateStr > TODAY;
+  const isMarkDateLocked = appliedDates.has(markDate);
+
+  const openSaveConfirm = () => setShowSaveConfirm(true);
+  const closeSaveConfirm = () => setShowSaveConfirm(false);
+
+  const handleViewDateChange = (e) => {
+    const selectedDate = e.target.value;
+    if (isWeekend(selectedDate)) {
+      const weekdayDate = getPreviousWeekday(selectedDate);
+      setViewDate(weekdayDate);
+      setError("Weekends are not allowed. Date adjusted to previous weekday.");
+      setTimeout(() => setError(""), 3000);
+    } else {
+      setViewDate(selectedDate);
+    }
+  };
+
+  const handleMarkDateChange = (e) => {
+    const selectedDate = e.target.value;
+    if (isWeekend(selectedDate)) {
+      const weekdayDate = getPreviousWeekday(selectedDate);
+      setMarkDate(weekdayDate);
+      setError("Weekends are not allowed. Date adjusted to previous weekday.");
+      setTimeout(() => setError(""), 3000);
+    } else {
+      setMarkDate(selectedDate);
+    }
+  };
 
   useEffect(() => {
     fetchViewAttendance();
   }, [viewDate]);
+
+  useEffect(() => {
+    if (markDate && !isFutureDate(markDate)) {
+      loadEmployeesAndExistingForMark();
+    }
+  }, [markDate]);
 
   const fetchViewAttendance = async () => {
     if (!viewDate) return;
@@ -87,8 +146,8 @@ export default function Attendance() {
         api.get("employees/"),
         api.get(`attendance/?date=${markDate}`).catch(() => ({ data: [] })),
       ]);
-      const empList = Array.isArray(empRes.data) ? empRes.data : [];
-      const attList = Array.isArray(attRes.data) ? attRes.data : [];
+      const empList = Array.isArray(empRes.data) ? empRes.data : empRes.data?.results ?? [];
+      const attList = Array.isArray(attRes.data) ? attRes.data : attRes.data?.results ?? [];
       setEmployees(empList);
 
       const byEmp = {};
@@ -110,6 +169,9 @@ export default function Attendance() {
       });
       setMarkByEmployee(byEmp);
       setExistingAttendanceIds(attIds);
+      if (attList.length > 0) {
+        setAppliedDates((prev) => new Set(prev).add(markDate));
+      }
     } catch (err) {
       setError(err.response?.data?.detail || "Failed to load employees.");
       setEmployees([]);
@@ -182,6 +244,7 @@ export default function Attendance() {
         }
       } else {
         setSuccess("Attendance saved for " + markDate + ".");
+        setAppliedDates((prev) => new Set(prev).add(markDate));
       }
 
       // refresh both view + mark sections for this date
@@ -193,6 +256,11 @@ export default function Attendance() {
     } finally {
       setMarkLoadings((prev) => ({ ...prev, save: false }));
     }
+  };
+
+  const handleSaveConfirm = () => {
+    closeSaveConfirm();
+    saveMarkAttendance();
   };
 
   return (
@@ -224,7 +292,7 @@ export default function Attendance() {
               className="input"
               value={viewDate}
               max={TODAY}
-              onChange={(e) => setViewDate(e.target.value)}
+              onChange={handleViewDateChange}
               style={{ maxWidth: "180px" }}
             />
           </div>
@@ -287,7 +355,7 @@ export default function Attendance() {
               className="input"
               value={markDate}
               max={TODAY}
-              onChange={(e) => setMarkDate(e.target.value)}
+              onChange={handleMarkDateChange}
               style={{ maxWidth: "180px" }}
             />
           </div>
@@ -316,6 +384,11 @@ export default function Attendance() {
           <p className="empty-state">Click “Load employees for this date” to mark attendance.</p>
         ) : employees.length === 0 ? null : (
           <>
+            {isMarkDateLocked && (
+              <p className="message message--success" style={{ marginBottom: "1rem" }}>
+                Attendance for this date has been applied. Editing is disabled.
+              </p>
+            )}
             <div className="table-wrap">
               <table className="table">
                 <thead>
@@ -336,6 +409,7 @@ export default function Attendance() {
                             id={`present-${emp.id}`}
                             checked={markByEmployee[emp.id] === "present"}
                             onChange={() => setAttendanceForEmployee(emp.id, "present")}
+                            disabled={isMarkDateLocked}
                           />
                           <label htmlFor={`present-${emp.id}`}>Present</label>
                         </div>
@@ -347,6 +421,7 @@ export default function Attendance() {
                             id={`absent-${emp.id}`}
                             checked={markByEmployee[emp.id] === "absent"}
                             onChange={() => setAttendanceForEmployee(emp.id, "absent")}
+                            disabled={isMarkDateLocked}
                           />
                           <label htmlFor={`absent-${emp.id}`}>Absent</label>
                         </div>
@@ -359,8 +434,8 @@ export default function Attendance() {
             <button
               type="button"
               className="btn btn--success"
-              onClick={saveMarkAttendance}
-              disabled={markLoadings.save || isFutureDate(markDate)}
+              onClick={openSaveConfirm}
+              disabled={markLoadings.save || isFutureDate(markDate) || isMarkDateLocked}
               style={{ marginTop: "1rem" }}
             >
               {markLoadings.save ? (
@@ -368,6 +443,8 @@ export default function Attendance() {
                   <Loader size="small" />
                   Saving…
                 </>
+              ) : isMarkDateLocked ? (
+                "Attendance applied (editing disabled)"
               ) : (
                 "Save attendance"
               )}
@@ -375,6 +452,34 @@ export default function Attendance() {
           </>
         )}
       </div>
+
+      {/* Save attendance confirmation popup */}
+      {showSaveConfirm && (
+        <div
+          className="delete-confirm-overlay"
+          onClick={closeSaveConfirm}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="save-attendance-confirm-title"
+        >
+          <div className="delete-confirm-popup" onClick={(e) => e.stopPropagation()}>
+            <h3 id="save-attendance-confirm-title" className="delete-confirm-title">
+              Confirm save attendance
+            </h3>
+            <p className="delete-confirm-message">
+              Once saved, attendance for this date <strong>cannot be edited</strong>. This ensures the credibility of the data. Are you sure you want to save?
+            </p>
+            <div className="delete-confirm-actions">
+              <button type="button" className="btn btn--secondary" onClick={closeSaveConfirm}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn--success" onClick={handleSaveConfirm}>
+                Yes, save attendance
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

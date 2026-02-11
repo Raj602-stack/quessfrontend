@@ -77,10 +77,6 @@ src/
 
 ## API / Backend
 
-backend hosted on RAILWAY
-
-URL:-https://splendid-wholeness-production-ecb0.up.railway.app
-
 The app talks to a REST API. The base URL is set in `src/api/axios.js`:
 
 - **Base URL:** `https://splendid-wholeness-production-ecb0.up.railway.app/api/`
