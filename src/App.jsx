@@ -5,10 +5,12 @@ import Employees from "./pages/Employees";
 import Attendance from "./pages/Attendance";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Layout from "./components/Layout";
+import AboutMe from "./components/AboutMe";
 
 function App() {
   return (
     <BrowserRouter>
+      <AboutMe />
       <Routes>
         <Route path="/" element={<Login />} />
         <Route

@@ -33,12 +33,20 @@ export default function Attendance() {
   // Store existing attendance record IDs: { employeeId: attendanceRecordId }
   const [existingAttendanceIds, setExistingAttendanceIds] = useState({});
 
+  const isFutureDate = (dateStr) => dateStr && dateStr > TODAY;
+
   useEffect(() => {
     fetchViewAttendance();
   }, [viewDate]);
 
   const fetchViewAttendance = async () => {
     if (!viewDate) return;
+    if (isFutureDate(viewDate)) {
+      setError("Cannot view attendance for future dates.");
+      setRecords([]);
+      setEmployeeNameMap({});
+      return;
+    }
     setViewLoading(true);
     setError("");
     try {
@@ -67,6 +75,10 @@ export default function Attendance() {
 
   const loadEmployeesAndExistingForMark = async () => {
     if (!markDate) return;
+    if (isFutureDate(markDate)) {
+      setError("Attendance cannot be marked for future dates.");
+      return;
+    }
     setMarkLoadings((prev) => ({ ...prev, fetch: true }));
     setError("");
     setSuccess("");
@@ -114,30 +126,64 @@ export default function Attendance() {
 
   const saveMarkAttendance = async () => {
     if (!markDate || employees.length === 0) return;
+    if (isFutureDate(markDate)) {
+      setError("Attendance cannot be marked for future dates.");
+      return;
+    }
     setMarkLoadings((prev) => ({ ...prev, save: true }));
     setError("");
     setSuccess("");
     try {
       // Process each employee: POST new or PATCH existing (send capitalized status for Django choices)
-      const promises = employees.map(async (emp) => {
-        const key = emp.id;
-        const status = markByEmployee[key] === "present" ? STATUS_PRESENT : STATUS_ABSENT;
-        const attendanceId = existingAttendanceIds[key];
+      const results = await Promise.allSettled(
+        employees.map(async (emp) => {
+          const key = emp.id;
+          const status = markByEmployee[key] === "present" ? STATUS_PRESENT : STATUS_ABSENT;
+          const attendanceId = existingAttendanceIds[key];
 
-        if (attendanceId) {
-          return api.patch(`attendance/${attendanceId}/`, { status });
-        } else {
-          return api.post("attendance/", {
-            employee: emp.id,
-            date: markDate,
-            status,
-          });
+          if (attendanceId) {
+            return api.patch(`attendance/${attendanceId}/`, { status });
+          } else {
+            return api.post("attendance/", {
+              employee: emp.id,
+              date: markDate,
+              status,
+            });
+          }
+        })
+      );
+
+      const failures = results
+        .map((result, idx) => {
+          if (result.status === "rejected") {
+            const emp = employees[idx];
+            const err = result.reason;
+            const msg =
+              err.response?.data?.detail ||
+              (err.response?.data && typeof err.response.data === "object"
+                ? JSON.stringify(err.response.data)
+                : String(err.response?.data)) ||
+              err.message ||
+              "Unknown error";
+            return `${emp?.full_name || `Employee ${idx + 1}`}: ${msg}`;
+          }
+          return null;
+        })
+        .filter(Boolean);
+
+      if (failures.length > 0) {
+        setError(
+          failures.length === employees.length
+            ? `Failed to save attendance: ${failures.join("; ")}`
+            : `Partially saved. Errors: ${failures.join("; ")}`
+        );
+        if (failures.length < employees.length) {
+          setSuccess(`Attendance saved for ${employees.length - failures.length} employee(s).`);
         }
-      });
+      } else {
+        setSuccess("Attendance saved for " + markDate + ".");
+      }
 
-      await Promise.all(promises);
-
-      setSuccess("Attendance saved for " + markDate + ".");
       // refresh both view + mark sections for this date
       fetchViewAttendance();
       loadEmployeesAndExistingForMark();
@@ -177,6 +223,7 @@ export default function Attendance() {
               type="date"
               className="input"
               value={viewDate}
+              max={TODAY}
               onChange={(e) => setViewDate(e.target.value)}
               style={{ maxWidth: "180px" }}
             />
@@ -186,6 +233,10 @@ export default function Attendance() {
           <div className="loader loader--full">
             <Loader size="large" />
           </div>
+        ) : isFutureDate(viewDate) ? (
+          <p className="empty-state" style={{ color: "var(--color-danger)" }}>
+            Cannot view attendance for future dates.
+          </p>
         ) : records.length === 0 ? (
           <p className="empty-state">No attendance records for this date.</p>
         ) : (
@@ -235,6 +286,7 @@ export default function Attendance() {
               type="date"
               className="input"
               value={markDate}
+              max={TODAY}
               onChange={(e) => setMarkDate(e.target.value)}
               style={{ maxWidth: "180px" }}
             />
@@ -243,7 +295,7 @@ export default function Attendance() {
             type="button"
             className="btn btn--secondary"
             onClick={loadEmployeesAndExistingForMark}
-            disabled={markLoadings.fetch || !markDate}
+            disabled={markLoadings.fetch || !markDate || isFutureDate(markDate)}
           >
             {markLoadings.fetch ? (
               <>
@@ -308,7 +360,7 @@ export default function Attendance() {
               type="button"
               className="btn btn--success"
               onClick={saveMarkAttendance}
-              disabled={markLoadings.save}
+              disabled={markLoadings.save || isFutureDate(markDate)}
               style={{ marginTop: "1rem" }}
             >
               {markLoadings.save ? (
